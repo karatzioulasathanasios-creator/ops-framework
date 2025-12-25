@@ -1,0 +1,595 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
+  <title>SINTELIA Pulse — DOGE/EUR</title>
+
+  <!-- Minimal PWA-ish -->
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <style>
+    :root { color-scheme: light; }
+    body { margin:0; font-family: -apple-system, system-ui, Segoe UI, Roboto, Helvetica, Arial; background:#fff; color:#0b0b0b; }
+    .wrap { max-width: 520px; margin: 0 auto; padding: 14px 14px 24px; }
+    .topbar { display:flex; align-items:center; justify-content:space-between; gap:10px; margin-top: 4px; }
+    .brand { font-weight: 700; letter-spacing: 0.2px; }
+    .pair { opacity:0.65; font-size: 12px; }
+    .live { font-size: 12px; display:flex; align-items:center; gap:6px; }
+    .dot { width:8px; height:8px; border-radius: 99px; background:#aaa; }
+    .card { border:1px solid #e7e7e7; border-radius: 16px; padding: 14px; margin-top: 12px; }
+    .status { display:flex; align-items:center; justify-content:space-between; gap:12px; }
+    .pill { font-size: 34px; font-weight: 800; letter-spacing: 0.5px; padding: 10px 14px; border-radius: 16px; display:inline-flex; align-items:center; gap:10px; }
+    .pill.go { background: #e9fbef; border:1px solid #bfeccc; }
+    .pill.hold { background: #fff8e6; border:1px solid #f2ddaa; }
+    .pill.nogo { background: #ffecec; border:1px solid #f0b5b5; }
+    .subline { font-size: 12px; opacity: 0.75; margin-top: 6px; }
+    .reasons { margin: 10px 0 0; padding-left: 18px; }
+    .reasons li { margin: 6px 0; }
+    .meters { display:grid; grid-template-columns: 1fr 1fr 1fr; gap:10px; margin-top: 12px; }
+    .m { border:1px solid #eee; border-radius: 14px; padding:10px; }
+    .m .t { font-size: 12px; opacity:0.7; }
+    .m .v { font-size: 20px; font-weight: 700; margin-top: 4px; }
+    .m .thr { font-size: 11px; opacity:0.55; margin-top: 4px; }
+    .chips { display:flex; gap:8px; flex-wrap: wrap; margin-top: 10px; }
+    .chip { border:1px solid #eee; border-radius: 999px; padding: 6px 10px; font-size: 12px; }
+    .chip.ok { background:#f3fff6; border-color:#d8f3de; }
+    .chip.warn { background:#fffaf0; border-color:#f1e1bf; }
+    .chip.bad { background:#fff1f1; border-color:#f0c2c2; }
+
+    .spark { width:100%; height: 70px; border:1px solid #eee; border-radius: 12px; margin-top: 10px; }
+    .row { display:flex; align-items:center; justify-content:space-between; gap:10px; }
+    .btn { border:1px solid #e7e7e7; border-radius: 12px; padding: 10px 12px; background:#fff; font-weight: 600; }
+    .btn:active { transform: scale(0.99); }
+    details { margin-top: 12px; }
+    summary { cursor:pointer; font-weight: 700; }
+    pre { white-space: pre-wrap; word-break: break-word; font-size: 12px; background:#fafafa; border:1px solid #eee; border-radius: 12px; padding: 10px; margin-top: 10px; }
+    .muted { opacity: 0.65; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="topbar">
+      <div>
+        <div class="brand">SINTELIA Pulse</div>
+        <div class="pair" id="pairLabel">DOGE/EUR</div>
+      </div>
+      <div class="live">
+        <span class="dot" id="dot"></span>
+        <span id="conn">CONNECTING</span>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="status">
+        <div class="pill hold" id="pill">🟡 HOLD</div>
+        <div style="text-align:right;">
+          <div style="font-weight:700;" id="price">—</div>
+          <div class="subline" id="spread">spread: —</div>
+        </div>
+      </div>
+
+      <div class="subline" id="rearmLine"></div>
+      <ul class="reasons" id="reasons"></ul>
+
+      <div class="meters">
+        <div class="m">
+          <div class="t">Spread z</div>
+          <div class="v" id="zs">—</div>
+          <div class="thr">thr: 1.0 / 2.5</div>
+        </div>
+        <div class="m">
+          <div class="t">Price vel z</div>
+          <div class="v" id="zr">—</div>
+          <div class="thr">thr: 0.8–2.2 / 2.5</div>
+        </div>
+        <div class="m">
+          <div class="t">Volume z</div>
+          <div class="v" id="zv">—</div>
+          <div class="thr">thr: 1.0</div>
+        </div>
+      </div>
+
+      <canvas class="spark" id="spark" width="480" height="70"></canvas>
+
+      <div class="chips" id="chips"></div>
+
+      <div class="row" style="margin-top:12px;">
+        <button class="btn" id="snap">Snapshot</button>
+        <div class="muted" style="font-size:12px;" id="last">—</div>
+      </div>
+
+      <details>
+        <summary>Details</summary>
+        <pre id="log"></pre>
+      </details>
+    </div>
+
+    <div class="muted" style="font-size:12px; margin-top:10px;">
+      This tool does not place orders. It only outputs GO/HOLD/NO-GO.
+    </div>
+  </div>
+
+<script>
+(() => {
+  // ====== Config ======
+  const PAIR = "DOGE-EUR"; // CEX spot pair format
+  const WS_URL = "wss://trade.cex.io/api/spot/ws-public"; // Public Spot Trading WS endpoint
+  const TOP_N = 10;
+
+  // ====== Minimal ring buffer ======
+  class Ring {
+    constructor(n){ this.n=n; this.a=new Array(n).fill(0); this.i=0; this.len=0; }
+    push(x){ this.a[this.i]=x; this.i=(this.i+1)%this.n; this.len=Math.min(this.len+1,this.n); }
+    values(){
+      const out=[];
+      for(let k=0;k<this.len;k++){
+        out.push(this.a[(this.i - this.len + k + this.n)%this.n]);
+      }
+      return out;
+    }
+  }
+  const mean = xs => xs.length ? xs.reduce((a,b)=>a+b,0)/xs.length : 0;
+  const std = xs => {
+    if(xs.length<2) return 0;
+    const m=mean(xs);
+    const v=xs.reduce((a,b)=>a+(b-m)*(b-m),0)/(xs.length-1);
+    return Math.sqrt(v);
+  };
+  const corr = (xs, ys) => {
+    const n=Math.min(xs.length, ys.length);
+    if(n<3) return 0;
+    const x=xs.slice(xs.length-n), y=ys.slice(ys.length-n);
+    const mx=mean(x), my=mean(y);
+    let num=0, dx=0, dy=0;
+    for(let i=0;i<n;i++){
+      const a=x[i]-mx, b=y[i]-my;
+      num+=a*b; dx+=a*a; dy+=b*b;
+    }
+    return (dx>0 && dy>0) ? num/Math.sqrt(dx*dy) : 0;
+  };
+  const zscore = (x, win) => {
+    const s=std(win), m=mean(win);
+    const eps=1e-9;
+    return (x-m)/(s+eps);
+  };
+
+  // ====== Orderbook state (price->amount) ======
+  const bids = new Map(); // price (string) -> amount (float)
+  const asks = new Map();
+
+  let bestBid = null, bestAsk = null;
+  let mid = null, prevMid = null;
+  let spreadN = null;
+
+  function mapSetSide(map, priceStr, amtStr){
+    const p = priceStr;
+    const a = parseFloat(amtStr);
+    if(!isFinite(a)) return;
+    if(a <= 0) map.delete(p);
+    else map.set(p, a);
+  }
+  function recomputeBest(){
+    // For speed in minimal MVP: compute best from current maps by scanning keys.
+    // (Fine for TOP_N-ish typical feed; can be optimized later.)
+    let bb = -Infinity, ba = Infinity;
+    for(const k of bids.keys()){
+      const p = parseFloat(k);
+      if(p > bb) bb = p;
+    }
+    for(const k of asks.keys()){
+      const p = parseFloat(k);
+      if(p < ba) ba = p;
+    }
+    bestBid = isFinite(bb) ? bb : null;
+    bestAsk = isFinite(ba) ? ba : null;
+
+    if(bestBid != null && bestAsk != null){
+      mid = (bestBid + bestAsk)/2;
+      spreadN = (bestAsk - bestBid) / Math.max(mid, 1e-12);
+    }
+  }
+  function computeImbalanceTopN(){
+    // Sum top N levels by price
+    const bidPrices = Array.from(bids.keys()).map(x=>parseFloat(x)).filter(isFinite).sort((a,b)=>b-a).slice(0, TOP_N);
+    const askPrices = Array.from(asks.keys()).map(x=>parseFloat(x)).filter(isFinite).sort((a,b)=>a-b).slice(0, TOP_N);
+
+    let bsum=0, asum=0;
+    for(const p of bidPrices){ bsum += bids.get(String(p)) ?? bids.get(p.toString()) ?? 0; }
+    for(const p of askPrices){ asum += asks.get(String(p)) ?? asks.get(p.toString()) ?? 0; }
+
+    const denom = (bsum + asum);
+    return denom > 0 ? (bsum - asum)/denom : 0;
+  }
+
+  // ====== Trade aggregation per second ======
+  let lastTradeId = null;
+  let tradeVolThisSec = 0;
+  let secStamp = Math.floor(Date.now()/1000);
+
+  function acceptTrade(tr){
+    const id = tr.tradeId;
+    if(lastTradeId && id <= lastTradeId) return;
+    lastTradeId = id;
+
+    // Aggregate per real clock second
+    const nowSec = Math.floor(Date.now()/1000);
+    if(nowSec !== secStamp){
+      secStamp = nowSec;
+      tradeVolThisSec = 0;
+    }
+    const amt = parseFloat(tr.amount);
+    if(isFinite(amt)) tradeVolThisSec += amt;
+  }
+
+  // ====== Sintelia Pulse Engine (browser) ======
+  const Ws = 60;
+  const Wl = 600;
+
+  const rWinS = new Ring(Ws);
+  const rWinL = new Ring(Wl);
+  const vWinS = new Ring(Ws);
+  const sWinS = new Ring(Ws);
+  const iWinS = new Ring(Ws);
+  const rSignWin = new Ring(Ws);
+
+  let state = "INIT";
+  let goStreak = 0;
+  let rearmStreak = 0;
+  let latched = false;
+
+  const logLines = [];
+  const MAX_LOG = 120;
+
+  function pushLog(line){
+    logLines.push(line);
+    if(logLines.length > MAX_LOG) logLines.shift();
+    document.getElementById("log").textContent = logLines.join("\n");
+  }
+
+  function fmt(x, d=2){
+    return (x==null || !isFinite(x)) ? "—" : x.toFixed(d);
+  }
+
+  function step1s(){
+    if(bestBid==null || bestAsk==null || mid==null) return;
+
+    // returns
+    let r = 0;
+    if(prevMid != null){
+      r = Math.log(mid) - Math.log(prevMid);
+    }
+    prevMid = mid;
+
+    const imb = computeImbalanceTopN();
+
+    rWinS.push(r); rWinL.push(r);
+    vWinS.push(tradeVolThisSec);
+    sWinS.push(spreadN);
+    iWinS.push(imb);
+
+    // chop rate
+    const sig = (r>0) ? 1 : (r<0 ? -1 : 0);
+    rSignWin.push(sig);
+
+    const rs = rWinS.values(), rl = rWinL.values();
+    const vs = vWinS.values(), ss = sWinS.values(), is = iWinS.values();
+    const sigs = rSignWin.values();
+
+    const z_r = zscore(r, rs);
+    const z_v = zscore(tradeVolThisSec, vs);
+    const z_s = zscore(spreadN, ss);
+
+    let flips=0;
+    for(let k=1;k<sigs.length;k++){
+      if(sigs[k]!==0 && sigs[k-1]!==0 && sigs[k]!==sigs[k-1]) flips++;
+    }
+    const chi = sigs.length>1 ? flips/(sigs.length-1) : 0;
+
+    // coherence: max lag corr(returns, volume)
+    let Cstar=0, bestLag=0;
+    const maxLag = Math.min(60, Math.max(0, rl.length-5));
+    const x = rl.slice(Math.max(0, rl.length - 300));
+    for(let tau=0;tau<=maxLag;tau++){
+      const y = vs.slice(Math.max(0, vs.length - 300 - tau), vs.length - tau);
+      const c = corr(x, y);
+      if(c > Cstar){ Cstar = c; bestLag = tau; }
+    }
+    const Crs = corr(rl.slice(Math.max(0, rl.length-300)), ss.slice(Math.max(0, ss.length-300)));
+    const rbar = mean(rs);
+    const Ibar = mean(is);
+    const AI = Math.sign(rbar || 0) * Ibar;
+
+    // Events
+    const hardSpread = (z_s > 2.5);
+    const hardPump = (z_r > 2.5 && z_v < 0.5);
+    const softChop = (chi > 0.35);
+
+    const goCond =
+      (z_r >= 0.8 && z_r <= 2.2) &&
+      (z_v >= 1.0) &&
+      (z_s <= 1.0) &&
+      (Cstar >= 0.25) &&
+      (Crs <= 0.10) &&
+      (AI >= 0.05);
+
+    let fired = {type:"HOLD", msg:"HOLD"};
+    let next = state;
+
+    if(state === "INIT") next = "HOLD";
+
+    if(hardSpread){
+      next = "NO_GO_LATCHED"; latched=true; goStreak=0; rearmStreak=0;
+      fired = {type:"SPREAD_SHOCK", msg:`z_s=${z_s.toFixed(2)} > 2.5`};
+    } else if(hardPump){
+      next = "NO_GO_LATCHED"; latched=true; goStreak=0; rearmStreak=0;
+      fired = {type:"PUMP_WITHOUT_VOLUME", msg:`z_r=${z_r.toFixed(2)}, z_v=${z_v.toFixed(2)}`};
+    } else if(state === "NO_GO_LATCHED") {
+      const stable = (z_s < 1.2) && (Math.abs(z_r) < 1.5) && (chi < 0.30);
+      if(stable) rearmStreak++; else rearmStreak=0;
+
+      if(rearmStreak >= 90){
+        next = "HOLD"; latched=false; rearmStreak=0;
+        fired = {type:"REARM_CLEAR", msg:"→ HOLD"};
+      } else {
+        fired = {type:"REARM_TICK", msg:`stable=${stable?"YES":"NO"} t=${rearmStreak}s`};
+      }
+    } else if(softChop){
+      next = "NO_GO"; goStreak=0;
+      fired = {type:"CHOP_DETECTED", msg:`chi=${chi.toFixed(2)} > 0.35`};
+    } else {
+      if(goCond){
+        goStreak++;
+        if(goStreak >= 20){
+          next = "GO";
+          fired = {type:"GO_STABLE_20S", msg:"GO stable ≥20s"};
+        } else {
+          fired = {type:"GO_CONDITIONS_MET", msg:`(${goStreak}s/20s)`};
+        }
+      } else {
+        goStreak=0;
+        if(state === "NO_GO") next = "HOLD";
+        fired = {type:"HOLD", msg:"HOLD"};
+      }
+    }
+
+    const changed = (next !== state);
+    state = next;
+
+    // Reasons (top-2)
+    const reasons = [];
+    if(hardSpread) reasons.push({p:1, t:`Spread shock (z_s=${z_s.toFixed(2)})`});
+    if(hardPump) reasons.push({p:2, t:`Pump w/out vol (z_r=${z_r.toFixed(2)}, z_v=${z_v.toFixed(2)})`});
+    if(softChop) reasons.push({p:3, t:`Chop (chi=${chi.toFixed(2)})`});
+    if(state==="NO_GO_LATCHED") reasons.push({p:4, t:`Latched: rearm ${Math.max(0, 90-rearmStreak)}s`});
+    if(state==="GO") reasons.push({p:5, t:`Coherent move confirmed`});
+    if(reasons.length===0) reasons.push({p:9, t:`No clear structure`});
+    reasons.sort((a,b)=>a.p-b.p);
+
+    // UI updates
+    const pill = document.getElementById("pill");
+    const rearmLine = document.getElementById("rearmLine");
+    pill.classList.remove("go","hold","nogo");
+
+    if(state==="GO"){
+      pill.textContent = "🟢 GO";
+      pill.classList.add("go");
+      rearmLine.textContent = "";
+    } else if(state==="NO_GO_LATCHED"){
+      pill.textContent = "🔴 NO-GO (LATCHED)";
+      pill.classList.add("nogo");
+      rearmLine.textContent = `Re-arm needs 90s stable (now: ${rearmStreak}s)`;
+    } else if(state==="NO_GO"){
+      pill.textContent = "🔴 NO-GO";
+      pill.classList.add("nogo");
+      rearmLine.textContent = "";
+    } else {
+      pill.textContent = "🟡 HOLD";
+      pill.classList.add("hold");
+      rearmLine.textContent = "";
+    }
+
+    const ul = document.getElementById("reasons");
+    ul.innerHTML = "";
+    reasons.slice(0,2).forEach(r => {
+      const li = document.createElement("li");
+      li.textContent = r.t;
+      ul.appendChild(li);
+    });
+
+    document.getElementById("zr").textContent = fmt(z_r,2);
+    document.getElementById("zv").textContent = fmt(z_v,2);
+    document.getElementById("zs").textContent = fmt(z_s,2);
+
+    document.getElementById("price").textContent = `€ ${mid.toFixed(6)}`;
+    document.getElementById("spread").textContent = `spread: ${(bestAsk-bestBid).toFixed(6)}  (${(spreadN*100).toFixed(3)}%)`;
+
+    const chips = document.getElementById("chips");
+    chips.innerHTML = "";
+    const chipClass = (ok,warn,bad,val) => (val>=bad ? "bad" : (val>=warn ? "warn" : "ok"));
+    // For chips: interpretability only
+    const c1 = document.createElement("div");
+    c1.className = "chip " + (Cstar>=0.25 ? "ok" : "warn");
+    c1.textContent = `C* ${Cstar.toFixed(2)} @ ${bestLag}s`;
+    chips.appendChild(c1);
+
+    const c2 = document.createElement("div");
+    c2.className = "chip " + (Crs<=0.10 ? "ok" : "warn");
+    c2.textContent = `Crs ${Crs.toFixed(2)}`;
+    chips.appendChild(c2);
+
+    const c3 = document.createElement("div");
+    c3.className = "chip " + (AI>=0.05 ? "ok" : "warn");
+    c3.textContent = `AI ${AI.toFixed(2)}`;
+    chips.appendChild(c3);
+
+    const ts = new Date().toTimeString().slice(0,8);
+    const line = `[${ts}] EVENT=${fired.type} ${fired.msg} -> STATE=${state}`;
+    if(changed || fired.type !== "HOLD") pushLog(line);
+
+    // sparkline buffer
+    pushPrice(mid);
+
+    document.getElementById("last").textContent = ts;
+    window.__PULSE_SNAPSHOT__ = {
+      ts: new Date().toISOString(),
+      pair: PAIR,
+      state,
+      bestBid, bestAsk, mid, spreadN,
+      tradeVol1s: tradeVolThisSec,
+      metrics: { z_r, z_v, z_s, chi, Cstar, bestLag, Crs, AI },
+      reasons: reasons.slice(0,2).map(x=>x.t),
+      log: logLines.slice()
+    };
+  }
+
+  // ====== Sparkline ======
+  const spark = document.getElementById("spark");
+  const ctx = spark.getContext("2d");
+  const PBUF = new Ring(1800); // ~30 min at 1s
+  function pushPrice(p){
+    PBUF.push(p);
+    drawSpark();
+  }
+  function drawSpark(){
+    const w = spark.width, h = spark.height;
+    ctx.clearRect(0,0,w,h);
+    const xs = PBUF.values();
+    if(xs.length < 2) return;
+    const min = Math.min(...xs), max = Math.max(...xs);
+    const pad = 6;
+    const scale = (max-min) > 0 ? (h-2*pad)/(max-min) : 1;
+    ctx.beginPath();
+    for(let i=0;i<xs.length;i++){
+      const x = (i/(xs.length-1))*(w-2*pad)+pad;
+      const y = h - pad - (xs[i]-min)*scale;
+      if(i===0) ctx.moveTo(x,y); else ctx.lineTo(x,y);
+    }
+    ctx.lineWidth = 2;
+    ctx.strokeStyle = "#111";
+    ctx.stroke();
+  }
+
+  // ====== WS connection ======
+  const dot = document.getElementById("dot");
+  const conn = document.getElementById("conn");
+  document.getElementById("pairLabel").textContent = "DOGE/EUR";
+
+  let ws = null;
+  let pingTimer = null;
+  let stepTimer = null;
+
+  function setConn(status){
+    conn.textContent = status;
+    if(status==="LIVE"){ dot.style.background = "#22c55e"; }
+    else if(status==="RECONNECTING"){ dot.style.background = "#f59e0b"; }
+    else { dot.style.background = "#9ca3af"; }
+  }
+
+  function oid(tag){ return `${Date.now()}_${tag}`; }
+
+  function connect(){
+    setConn("CONNECTING");
+    ws = new WebSocket(WS_URL);
+
+    ws.onopen = () => {
+      setConn("LIVE");
+
+      // Keepalive: send ping every 5 seconds (safe under 10s requirement)
+      pingTimer = setInterval(() => {
+        try { ws.send(JSON.stringify({e:"ping"})); } catch(_) {}
+      }, 5000);
+
+      // Subscribe: order book + trades
+      ws.send(JSON.stringify({ e:"order_book_subscribe", oid: oid("ob"), data: { pair: PAIR } }));
+      ws.send(JSON.stringify({ e:"trade_subscribe", oid: oid("tr"), data: { pair: PAIR } }));
+
+      // 1s engine tick
+      if(stepTimer) clearInterval(stepTimer);
+      stepTimer = setInterval(step1s, 1000);
+    };
+
+    ws.onmessage = (ev) => {
+      let msg;
+      try { msg = JSON.parse(ev.data); } catch(_) { return; }
+      if(!msg || !msg.e) return;
+
+      // Handle pings (server may also send ping/pong)
+      if(msg.e==="pong") return;
+
+      // Order book snapshot / increments
+      if(msg.e==="order_book_subscribe" && msg.ok==="ok" && msg.data?.pair===PAIR){
+        // snapshot
+        bids.clear(); asks.clear();
+        (msg.data.bids || []).forEach(([p,a]) => mapSetSide(bids, p, a));
+        (msg.data.asks || []).forEach(([p,a]) => mapSetSide(asks, p, a));
+        recomputeBest();
+        pushLog(`[${new Date().toTimeString().slice(0,8)}] EVENT=OB_SNAPSHOT ok -> STATE=${state}`);
+        return;
+      }
+      if(msg.e==="order_book_increment" && msg.ok==="ok" && msg.data?.pair===PAIR){
+        (msg.data.bids || []).forEach(([p,a]) => mapSetSide(bids, p, a));
+        (msg.data.asks || []).forEach(([p,a]) => mapSetSide(asks, p, a));
+        recomputeBest();
+        return;
+      }
+
+      // Trades
+      if(msg.e==="tradeHistorySnapshot" && msg.ok==="ok" && msg.data?.pair===PAIR){
+        const trades = msg.data.trades || [];
+        trades.forEach(acceptTrade);
+        pushLog(`[${new Date().toTimeString().slice(0,8)}] EVENT=TR_SNAPSHOT n=${trades.length} -> STATE=${state}`);
+        return;
+      }
+      if(msg.e==="tradeUpdate" && msg.ok==="ok" && msg.data?.pair===PAIR){
+        acceptTrade(msg.data);
+        return;
+      }
+
+      // Connectivity
+      if(msg.e==="connected"){
+        pushLog(`[${new Date().toTimeString().slice(0,8)}] EVENT=CONNECTED`);
+      }
+      if(msg.e==="disconnected"){
+        pushLog(`[${new Date().toTimeString().slice(0,8)}] EVENT=DISCONNECTED`);
+      }
+
+      // Any errors
+      if(msg.error || (msg.ok && msg.ok!=="ok")){
+        pushLog(`[${new Date().toTimeString().slice(0,8)}] EVENT=ERROR ${JSON.stringify(msg)}`);
+      }
+    };
+
+    ws.onclose = () => {
+      setConn("RECONNECTING");
+      if(pingTimer) clearInterval(pingTimer);
+      if(stepTimer) clearInterval(stepTimer);
+      pingTimer = null; stepTimer = null;
+
+      // attempt reconnect
+      setTimeout(connect, 1200);
+    };
+
+    ws.onerror = () => {
+      // onclose will handle reconnect
+    };
+  }
+
+  // Snapshot button
+  document.getElementById("snap").onclick = () => {
+    const snap = window.__PULSE_SNAPSHOT__ || { note: "No data yet." };
+    const blob = new Blob([JSON.stringify(snap, null, 2)], {type:"application/json"});
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `sintelia_pulse_${PAIR}_${Date.now()}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  // Start
+  connect();
+})();
+</script>
+</body>
+</html>
